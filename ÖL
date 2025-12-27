@@ -1,98 +1,103 @@
 #!/usr/bin/env python3
 """
 oil_price_forecast.py
-Calm, robust, professional oil forecast (WTI + Brent)
-Yahoo Finance only
+Minimal, robust, go-live safe oil forecast (Brent + WTI)
+
+- Yahoo Finance only
+- Trend filter
+- Trade only on strong probabilities
+- Writes forecast_output.txt (overwrite each run)
 """
 
-import json
-import numpy as np
-import pandas as pd
-from datetime import datetime
 import yfinance as yf
-from sklearn.ensemble import RandomForestClassifier
+import pandas as pd
+import numpy as np
+from datetime import datetime
+from sklearn.linear_model import LogisticRegression
 
-# =========================
+# =====================
 # CONFIG
-# =========================
+# =====================
 START_DATE = "2012-01-01"
 
-SYMBOL_WTI = "CL=F"
-SYMBOL_BRENT = "BZ=F"
+BRENT = "BZ=F"
+WTI = "CL=F"
 
-PROB_THRESHOLD = 0.57
-OUTPUT_TXT = "oil_forecast.txt"
+PROB_LONG = 0.57
+PROB_SHORT = 0.43
 
-# =========================
-# HELPERS
-# =========================
-def fetch_price(symbol):
+OUTPUT_FILE = "forecast_output.txt"
+
+# =====================
+# LOAD DATA
+# =====================
+def load_prices(symbol):
     df = yf.download(symbol, start=START_DATE, progress=False)
-    df = df[["Close"]].rename(columns={"Close": symbol})
-    return df.dropna()
+    if "Close" not in df.columns or len(df) < 300:
+        raise RuntimeError(f"Invalid data for {symbol}")
+    return df[["Close"]].rename(columns={"Close": symbol})
 
+# =====================
+# FEATURES
+# =====================
 def build_features(df):
     df = df.copy()
+    df["ret"] = df.iloc[:, 0].pct_change()
+    df["ret_lag1"] = df["ret"].shift(1)
+    df["ret_lag2"] = df["ret"].shift(2)
+    df["vol5"] = df["ret"].rolling(5).std().shift(1)
+    df["sma50"] = df.iloc[:, 0].rolling(50).mean()
+    df["trend_up"] = (df.iloc[:, 0] > df["sma50"]).astype(int)
 
-    df["Return"] = df.iloc[:, 0].pct_change()
-    df["Momentum_5"] = df.iloc[:, 0].pct_change(5)
-    df["Momentum_10"] = df.iloc[:, 0].pct_change(10)
-    df["Volatility_5"] = df["Return"].rolling(5).std()
-    df["SMA_50"] = df.iloc[:, 0].rolling(50).mean()
-
-    df["Target"] = (df["Return"].shift(-1) > 0).astype(int)
-
+    df["target"] = (df["ret"].shift(-1) > 0).astype(int)
     df = df.dropna()
     return df
 
+# =====================
+# MODEL
+# =====================
 def train_model(df):
-    features = ["Return", "Momentum_5", "Momentum_10", "Volatility_5"]
-    X = df[features]
-    y = df["Target"]
-
-    model = RandomForestClassifier(
-        n_estimators=300,
-        max_depth=6,
-        min_samples_leaf=10,
-        random_state=42
-    )
+    X = df[["ret_lag1", "ret_lag2", "vol5"]]
+    y = df["target"]
+    model = LogisticRegression(max_iter=1000)
     model.fit(X, y)
-    return model, features
+    return model
 
-# =========================
-# MAIN
-# =========================
-def run_forecast(symbol, name):
-    df_raw = fetch_price(symbol)
-    df = build_features(df_raw)
+# =====================
+# FORECAST
+# =====================
+def forecast(symbol):
+    prices = load_prices(symbol)
+    df = build_features(prices)
+    model = train_model(df)
 
-    model, features = train_model(df)
+    last = df.iloc[-1]
+    X_last = last[["ret_lag1", "ret_lag2", "vol5"]].values.reshape(1, -1)
+    prob_up = float(model.predict_proba(X_last)[0][1])
 
-    last = df.iloc[-1:]
-    prob_up = model.predict_proba(last[features])[0][1]
+    trend_ok = bool(last["trend_up"])
+    price = float(prices.iloc[-1, 0])
 
-    price = float(df_raw.iloc[-1, 0])
-    sma50 = float(df["SMA_50"].iloc[-1])
-
-    trend_ok = price > sma50
-    signal = "NO_TRADE"
-
-    if prob_up >= PROB_THRESHOLD and trend_ok:
+    if prob_up >= PROB_LONG and trend_ok:
         signal = "LONG"
+    elif prob_up <= PROB_SHORT and not trend_ok:
+        signal = "SHORT"
+    else:
+        signal = "NO_TRADE"
 
     return {
-        "instrument": name,
-        "price": round(price, 2),
-        "prob_up": round(prob_up * 100, 2),
-        "trend": "UP" if trend_ok else "DOWN",
+        "symbol": symbol,
+        "price": price,
+        "prob_up": prob_up,
+        "trend_up": trend_ok,
         "signal": signal
     }
 
-def main():
+# =====================
+# OUTPUT
+# =====================
+def write_output(brent, wti):
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-
-    wti = run_forecast(SYMBOL_WTI, "WTI")
-    brent = run_forecast(SYMBOL_BRENT, "BRENT")
 
     lines = []
     lines.append("===================================")
@@ -101,18 +106,25 @@ def main():
     lines.append(f"Run time (UTC): {now}")
     lines.append("")
 
-    for r in (wti, brent):
-        lines.append(f"{r['instrument']}")
-        lines.append(f"Price        : {r['price']}")
-        lines.append(f"Prob UP      : {r['prob_up']}%")
-        lines.append(f"Trend        : {r['trend']}")
-        lines.append(f"Signal       : {r['signal']}")
+    for r in (brent, wti):
+        lines.append(f"Market: {r['symbol']}")
+        lines.append(f"Price : {r['price']:.2f}")
+        lines.append(f"Prob UP: {r['prob_up']:.2%}")
+        lines.append(f"Trend UP: {r['trend_up']}")
+        lines.append(f"Signal: {r['signal']}")
         lines.append("-----------------------------------")
 
-    with open(OUTPUT_TXT, "w", encoding="utf-8") as f:
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
-    print("[OK] Forecast written to", OUTPUT_TXT)
+# =====================
+# MAIN
+# =====================
+def main():
+    brent = forecast(BRENT)
+    wti = forecast(WTI)
+    write_output(brent, wti)
+    print("[OK] Forecast written to forecast_output.txt")
 
 if __name__ == "__main__":
     main()
