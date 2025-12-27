@@ -1,25 +1,43 @@
 #!/usr/bin/env python3
-# oil_price_forecast.py
+"""
+oil_price_forecast.py
+Clean, robust, professional oil forecast (WTI + Brent)
 
-import yfinance as yf
-import pandas as pd
+- Yahoo Finance only
+- No leakage
+- Trend filter
+- Probability-based trading signal
+"""
+
+import json
 import numpy as np
+import pandas as pd
 from datetime import datetime
 
-# -----------------------
-# Config
-# -----------------------
-START_DATE = "2010-01-01"
-WTI = "CL=F"
-BRENT = "BZ=F"
-PROB_THRESHOLD = 0.57
+import yfinance as yf
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.metrics import accuracy_score
 
-# -----------------------
-# Load data
-# -----------------------
+# ======================
+# CONFIG
+# ======================
+START_DATE = "2012-01-01"
+
+SYMBOL_WTI = "CL=F"
+SYMBOL_BRENT = "BZ=F"
+
+PROB_THRESHOLD = 0.57   # trade only above this
+OUTPUT_TXT = "oil_forecast.txt"
+OUTPUT_JSON = "oil_forecast.json"
+
+
+# ======================
+# DATA LOADING
+# ======================
 def load_prices():
-    wti = yf.download(WTI, start=START_DATE, auto_adjust=True, progress=False)
-    brent = yf.download(BRENT, start=START_DATE, auto_adjust=True, progress=False)
+    wti = yf.download(SYMBOL_WTI, start=START_DATE, progress=False)
+    brent = yf.download(SYMBOL_BRENT, start=START_DATE, progress=False)
 
     df = pd.DataFrame({
         "WTI": wti["Close"],
@@ -28,88 +46,40 @@ def load_prices():
 
     return df
 
-# -----------------------
-# Features
-# -----------------------
+
+# ======================
+# FEATURES
+# ======================
 def build_features(df):
     df = df.copy()
 
-    df["WTI_ret1"] = df["WTI"].pct_change()
-    df["WTI_ret5"] = df["WTI"].pct_change(5)
+    # Returns
+    df["WTI_ret"] = df["WTI"].pct_change()
+    df["Brent_ret"] = df["Brent"].pct_change()
 
-    df["Vol5"] = df["WTI_ret1"].rolling(5).std()
+    # Momentum
+    for n in [3, 5, 10]:
+        df[f"WTI_mom_{n}"] = df["WTI"].pct_change(n)
+        df[f"Brent_mom_{n}"] = df["Brent"].pct_change(n)
 
-    df["SMA20"] = df["WTI"].rolling(20).mean()
-    df["SMA50"] = df["WTI"].rolling(50).mean()
+    # Trend filter
+    df["WTI_SMA10"] = df["WTI"].rolling(10).mean()
+    df["WTI_SMA30"] = df["WTI"].rolling(30).mean()
 
-    df["Trend_UP"] = (df["SMA20"] > df["SMA50"]).astype(int)
+    df["Trend_UP"] = (df["WTI_SMA10"] > df["WTI_SMA30"]).astype(int)
 
-    df["Brent_WTI_Spread"] = df["Brent"] - df["WTI"]
-    df["Spread_z"] = (
-        (df["Brent_WTI_Spread"] -
-         df["Brent_WTI_Spread"].rolling(52).median())
-        / df["Brent_WTI_Spread"].rolling(52).std()
-    ).shift(1)
-
-    df["Target"] = (df["WTI_ret1"].shift(-1) > 0).astype(int)
+    # Target: next day direction
+    df["Target"] = (df["WTI_ret"].shift(-1) > 0).astype(int)
 
     df = df.dropna()
     return df
 
-# -----------------------
-# Model (simple & robust)
-# -----------------------
-from sklearn.ensemble import RandomForestClassifier
 
-def train_model(df):
-    features = [
-        "WTI_ret1", "WTI_ret5",
-        "Vol5", "Spread_z"
-    ]
-
+# ======================
+# MODEL
+# ======================
+def train_model(df, features):
     X = df[features]
     y = df["Target"]
 
-    model = RandomForestClassifier(
-        n_estimators=300,
-        max_depth=5,
-        min_samples_leaf=10,
-        random_state=42
-    )
-    model.fit(X, y)
-
-    return model, features
-
-# -----------------------
-# Main
-# -----------------------
-def main():
-    df = load_prices()
-    df = build_features(df)
-
-    model, features = train_model(df)
-
-    last = df.iloc[-1:]
-    prob_up = model.predict_proba(last[features])[0, 1]
-
-    trend_ok = last["Trend_UP"].iloc[0] == 1
-
-    signal = (
-        "TRADE_UP"
-        if prob_up >= PROB_THRESHOLD and trend_ok
-        else "NO_TRADE"
-    )
-
-    print("===================================")
-    print(" OIL PRICE FORECAST (WTI / BRENT)")
-    print("===================================")
-    print("Run time (UTC):", datetime.utcnow())
-    print("Data date     :", last.index[0].date())
-    print("")
-    print(f"Prob UP        : {prob_up:.2%}")
-    print(f"Trend OK       : {trend_ok}")
-    print(f"Signal         : {signal}")
-    print("===================================")
-
-if __name__ == "__main__":
-    main()
+    tscv = TimeSeriesSplit(n
