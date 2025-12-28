@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 oil_price_forecast.py
-CODE A – robust, professional, deterministic
+CODE A – calm, robust, professional
 
 Brent + WTI + Spread
 TXT output only (always overwritten)
@@ -33,20 +33,20 @@ def load_prices():
     df["Brent_Close"] = brent["Close"]
     df["WTI_Close"] = wti["Close"]
 
-    return df.dropna()
+    df = df.dropna()
+    return df
 
 # =========================
-# SIGNAL LOGIC (CODE A)
+# SIGNAL LOGIC – CODE A
 # =========================
 def build_signal(df: pd.DataFrame):
     df = df.copy()
 
-    df["Brent_Return"] = df["Brent_Close"].pct_change()
-    df["WTI_Return"] = df["WTI_Close"].pct_change()
-
+    # Trend (20d)
     df["Brent_Trend"] = df["Brent_Close"] > df["Brent_Close"].rolling(20).mean()
     df["WTI_Trend"] = df["WTI_Close"] > df["WTI_Close"].rolling(20).mean()
 
+    # Brent–WTI Spread
     df["Spread"] = df["Brent_Close"] - df["WTI_Close"]
     df["Spread_Z"] = (
         (df["Spread"] - df["Spread"].rolling(60).mean())
@@ -56,6 +56,7 @@ def build_signal(df: pd.DataFrame):
     df = df.dropna()
     last = df.iloc[-1]
 
+    # --- Probability model ---
     prob_up = 0.50
 
     if last["Brent_Trend"] and last["WTI_Trend"]:
@@ -88,9 +89,9 @@ def build_signal(df: pd.DataFrame):
     }
 
 # =========================
-# OUTPUT (TXT)
+# OUTPUT
 # =========================
-def write_output_txt(result: dict):
+def write_output_txt(result):
     text = f"""===================================
       OIL FORECAST – CODE A
 ===================================
@@ -99,7 +100,7 @@ Data date     : {result['data_date']}
 
 Brent Close   : {result['brent']:.2f}
 WTI Close     : {result['wti']:.2f}
-Brent–WTI Spd : {result['spread']:.2f}
+Brent–WTI Spr.: {result['spread']:.2f}
 
 Prob UP       : {result['prob_up']:.2%}
 Prob DOWN     : {result['prob_down']:.2%}
