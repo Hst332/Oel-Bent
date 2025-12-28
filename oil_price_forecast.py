@@ -1,86 +1,81 @@
 #!/usr/bin/env python3
 """
 oil_price_forecast.py
+CODE A – robust, professional, no ML, no sklearn.
 
-CODE A – Ruhig, robust, professionell
-- Brent & WTI von Yahoo Finance
-- Brent–WTI Spread
-- Kein ML, kein sklearn
-- TXT Output (überschreibt jedes Mal)
+Brent + WTI + Spread
+TXT output only (always overwritten)
 """
 
 import yfinance as yf
 import pandas as pd
 from datetime import datetime
 
-# -----------------------
-# Config
-# -----------------------
+# =========================
+# CONFIG
+# =========================
 START_DATE = "2015-01-01"
-BRENT_SYMBOL = "BZ=F"
-WTI_SYMBOL = "CL=F"
+SYMBOL_BRENT = "BZ=F"
+SYMBOL_WTI = "CL=F"
 
 OUTPUT_TXT = "oil_forecast_output.txt"
 
-# -----------------------
-# Load data
-# -----------------------
+# =========================
+# LOAD DATA
+# =========================
 def load_prices():
-    brent = yf.download(BRENT_SYMBOL, start=START_DATE, progress=False)
-    wti = yf.download(WTI_SYMBOL, start=START_DATE, progress=False)
+    brent = yf.download(SYMBOL_BRENT, start=START_DATE, progress=False)
+    wti = yf.download(SYMBOL_WTI, start=START_DATE, progress=False)
 
     if brent.empty or wti.empty:
-        raise RuntimeError("Yahoo returned empty data")
+        raise RuntimeError("Yahoo data download failed")
 
-    df = pd.DataFrame({
-        "Brent": brent["Close"],
-        "WTI": wti["Close"]
-    }).dropna()
+    df = pd.DataFrame(index=brent.index)
+    df["Brent_Close"] = brent["Close"]
+    df["WTI_Close"] = wti["Close"]
 
+    df = df.dropna()
     return df
 
-# -----------------------
-# Forecast logic (CODE A)
-# -----------------------
-def compute_forecast(df: pd.DataFrame) -> dict:
+# =========================
+# SIGNAL LOGIC (CODE A)
+# =========================
+def build_signal(df: pd.DataFrame):
     df = df.copy()
 
     # Returns
-    df["Brent_ret"] = df["Brent"].pct_change()
-    df["WTI_ret"] = df["WTI"].pct_change()
+    df["Brent_Return"] = df["Brent_Close"].pct_change()
+    df["WTI_Return"] = df["WTI_Close"].pct_change()
+
+    # Trend (20d)
+    df["Brent_Trend"] = df["Brent_Close"] > df["Brent_Close"].rolling(20).mean()
+    df["WTI_Trend"] = df["WTI_Close"] > df["WTI_Close"].rolling(20).mean()
 
     # Spread
-    df["Spread"] = df["Brent"] - df["WTI"]
-    df["Spread_change"] = df["Spread"].diff()
+    df["Brent_WTI_Spread"] = df["Brent_Close"] - df["WTI_Close"]
+    df["Spread_Z"] = (
+        (df["Brent_WTI_Spread"] - df["Brent_WTI_Spread"].rolling(60).mean())
+        / df["Brent_WTI_Spread"].rolling(60).std()
+    )
 
     df = df.dropna()
-
     last = df.iloc[-1]
 
+    # --- Probability model (simple & robust) ---
     prob_up = 0.50
 
-    # Trend contribution
-    if last["Brent_ret"] > 0:
-        prob_up += 0.015
-    else:
-        prob_up -= 0.015
+    if last["Brent_Trend"] and last["WTI_Trend"]:
+        prob_up += 0.07
 
-    if last["WTI_ret"] > 0:
-        prob_up += 0.015
-    else:
-        prob_up -= 0.015
+    if last["Spread_Z"] > 0.5:
+        prob_up += 0.03
+    elif last["Spread_Z"] < -0.5:
+        prob_up -= 0.03
 
-    # Spread logic
-    if last["Spread_change"] > 0:
-        prob_up += 0.01
-    else:
-        prob_up -= 0.01
-
-    # Clamp
-    prob_up = max(0.45, min(0.55, prob_up))
+    prob_up = max(0.0, min(1.0, prob_up))
     prob_down = 1.0 - prob_up
 
-    # Signal
+    # Signal rules
     if prob_up >= 0.57:
         signal = "UP"
     elif prob_up <= 0.43:
@@ -92,46 +87,46 @@ def compute_forecast(df: pd.DataFrame) -> dict:
         "prob_up": prob_up,
         "prob_down": prob_down,
         "signal": signal,
-        "data_date": last.name.date().isoformat(),
-        "brent": float(last["Brent"]),
-        "wti": float(last["WTI"]),
-        "spread": float(last["Spread"]),
+        "brent": float(last["Brent_Close"]),
+        "wti": float(last["WTI_Close"]),
+        "spread": float(last["Brent_WTI_Spread"]),
+        "date": last.name.date().isoformat(),
     }
 
-# -----------------------
-# Output
-# -----------------------
-def write_txt(result: dict):
+# =========================
+# OUTPUT
+# =========================
+def write_txt(res: dict):
     now_utc = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
     lines = [
         "===================================",
-        "   OIL FORECAST – BRENT / WTI (A)",
+        "   OIL FORECAST – CODE A",
         "===================================",
         f"Run time (UTC): {now_utc}",
-        f"Data date     : {result['data_date']}",
+        f"Data date     : {res['date']}",
         "",
-        f"Brent Close   : {result['brent']:.2f}",
-        f"WTI Close     : {result['wti']:.2f}",
-        f"Brent–WTI Spd : {result['spread']:.2f}",
+        f"Brent Close   : {res['brent']:.2f}",
+        f"WTI Close     : {res['wti']:.2f}",
+        f"Brent-WTI Spr.: {res['spread']:.2f}",
         "",
-        f"Prob UP       : {result['prob_up']*100:.2f}%",
-        f"Prob DOWN     : {result['prob_down']*100:.2f}%",
-        f"Signal        : {result['signal']}",
+        f"Prob UP       : {res['prob_up']*100:.2f}%",
+        f"Prob DOWN     : {res['prob_down']*100:.2f}%",
+        f"Signal        : {res['signal']}",
         "===================================",
     ]
 
     with open(OUTPUT_TXT, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
-# -----------------------
-# Main
-# -----------------------
+# =========================
+# MAIN
+# =========================
 def main():
     df = load_prices()
-    result = compute_forecast(df)
-    write_txt(result)
-    print("[OK] Oil forecast written to", OUTPUT_TXT)
+    res = build_signal(df)
+    write_txt(res)
+    print("[OK] oil_forecast_output.txt written")
 
 if __name__ == "__main__":
     main()
