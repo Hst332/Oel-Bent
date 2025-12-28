@@ -125,7 +125,7 @@ def write_txt(res: dict):
 def main():
     df = load_prices()
     res = build_signal(df)
-    write_txt(res)
+    write_output_txt(result)
     print("[OK] oil_forecast_output.txt written")
 
 if __name__ == "__main__":
