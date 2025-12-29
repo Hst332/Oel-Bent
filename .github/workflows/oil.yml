@@ -1,18 +1,35 @@
 name: Oil Forecast
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "30 14 * * 1-5"
+    - cron: "0 6 * * 1-5"   # Mo–Fr 06:00 UTC
+  workflow_dispatch:
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Install deps
-        run: pip install yfinance pandas numpy
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install yfinance pandas
 
       - name: Run forecast
-        run: python oil_price_forecast.py
+        run: |
+          python oil_price_forecast.py
+
+      - name: Commit forecast output
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add oil_price_forecast.txt
+          git commit -m "Update oil forecast" || echo "No changes"
+          git push
