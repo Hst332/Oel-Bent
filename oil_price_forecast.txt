@@ -1,0 +1,14 @@
+===================================
+      OIL FORECAST – CODE A
+===================================
+Run time (UTC): 2025-12-29 08:21:53 UTC
+Data date     : 2025-12-29
+
+Brent Close   : 60.89
+WTI Close     : 57.43
+Brent–WTI Spd : 3.46
+
+Prob UP       : 47.00%
+Prob DOWN     : 53.00%
+Signal        : NO_TRADE
+===================================
