@@ -1,21 +1,21 @@
 ===================================
    ENERGY FORECAST – CODE A
 ===================================
-Run time (UTC): 2026-01-06 06:38:27 UTC
+Run time (UTC): 2026-01-07 06:37:46 UTC
 
 --------- NATURAL GAS ---------
-Data date : 2026-01-06
-Model CV  : 50.72% ± 2.67%
-Prob UP   : 56.92%
-Prob DOWN : 43.08%
+Data date : 2026-01-07
+Model CV  : 50.52% ± 2.56%
+Prob UP   : 53.29%
+Prob DOWN : 46.71%
 Signal    : NO_TRADE
 
 --------- OIL (BRENT / WTI) ---------
-Data date     : 2026-01-06
-Brent Close   : 61.64
-WTI Close     : 58.14
-Brent–WTI Spd : 3.50
-Prob UP       : 54.00%
-Prob DOWN     : 46.00%
+Data date     : 2026-01-07
+Brent Close   : 60.09
+WTI Close     : 56.33
+Brent–WTI Spd : 3.76
+Prob UP       : 47.00%
+Prob DOWN     : 53.00%
 Signal        : NO_TRADE
 ===================================
